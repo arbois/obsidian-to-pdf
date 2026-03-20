@@ -130,12 +130,7 @@ class TestDetectEngine:
                 "pandoc": "/usr/local/bin/pandoc",
             }.get(name)
 
-        fake_result = mock.Mock()
-        fake_result.stdout = "pandoc 3.5.0\nCompiled with pandoc-types..."
-        fake_result.returncode = 0
-
-        with mock.patch("shutil.which", side_effect=fake_which), \
-             mock.patch("subprocess.run", return_value=fake_result):
+        with mock.patch("shutil.which", side_effect=fake_which):
             engine, engine_name = detect_engine("auto")
         assert engine == "typst"
         assert engine_name == "typst"
@@ -204,7 +199,7 @@ class TestPandocVersionCheck:
         fake_result.stdout = "pandoc 3.1.6\nCompiled with pandoc-types..."
         with mock.patch("subprocess.run", return_value=fake_result):
             with pytest.raises(SystemExit):
-                check_pandoc_version_for_typst()
+                check_pandoc_version_for_typst("/usr/local/bin/pandoc")
 
     def test_accepts_sufficient_pandoc_317(self):
         """Test 15a: Accepts pandoc 3.1.7."""
@@ -212,7 +207,7 @@ class TestPandocVersionCheck:
         fake_result.returncode = 0
         fake_result.stdout = "pandoc 3.1.7\nCompiled with pandoc-types..."
         with mock.patch("subprocess.run", return_value=fake_result):
-            check_pandoc_version_for_typst()  # should not raise
+            check_pandoc_version_for_typst("/usr/local/bin/pandoc")  # should not raise
 
     def test_accepts_sufficient_pandoc_350(self):
         """Test 15b: Accepts pandoc 3.5.0."""
@@ -220,7 +215,34 @@ class TestPandocVersionCheck:
         fake_result.returncode = 0
         fake_result.stdout = "pandoc 3.5.0\nCompiled with pandoc-types..."
         with mock.patch("subprocess.run", return_value=fake_result):
-            check_pandoc_version_for_typst()  # should not raise
+            check_pandoc_version_for_typst("/usr/local/bin/pandoc")  # should not raise
+
+    def test_handles_rc_suffix(self):
+        """Test 15c: Handles version strings with non-numeric suffixes like 3.1.7-rc1."""
+        fake_result = mock.Mock()
+        fake_result.returncode = 0
+        fake_result.stdout = "pandoc 3.1.7-rc1\nCompiled with pandoc-types..."
+        with mock.patch("subprocess.run", return_value=fake_result):
+            check_pandoc_version_for_typst("/usr/local/bin/pandoc")  # should not raise
+
+    def test_rejects_old_pandoc_with_rc_suffix(self):
+        """Test 15d: Rejects old pandoc even with rc suffix."""
+        fake_result = mock.Mock()
+        fake_result.returncode = 0
+        fake_result.stdout = "pandoc 3.1.6-rc2\nCompiled with pandoc-types..."
+        with mock.patch("subprocess.run", return_value=fake_result):
+            with pytest.raises(SystemExit):
+                check_pandoc_version_for_typst("/usr/local/bin/pandoc")
+
+    def test_uses_provided_pandoc_path(self):
+        """Test 15e: Uses the provided pandoc path, not bare 'pandoc'."""
+        fake_result = mock.Mock()
+        fake_result.returncode = 0
+        fake_result.stdout = "pandoc 3.5.0\nCompiled with pandoc-types..."
+        with mock.patch("subprocess.run", return_value=fake_result) as mock_run:
+            check_pandoc_version_for_typst("/custom/path/pandoc")
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0][0] == "/custom/path/pandoc"
 
 
 class TestInvalidEngine:

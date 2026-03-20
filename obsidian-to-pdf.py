@@ -246,7 +246,6 @@ def detect_engine(engine_arg):
 
     typst_path = shutil.which("typst")
     if typst_path:
-        check_pandoc_version_for_typst()
         return "typst", "typst"
 
     print("ERROR: No PDF engine found (looked for xelatex, pdflatex, typst).")
@@ -255,14 +254,17 @@ def detect_engine(engine_arg):
     sys.exit(1)
 
 
-def check_pandoc_version_for_typst():
+def check_pandoc_version_for_typst(pandoc_path="pandoc"):
     """Verify pandoc >= 3.1.7 for Typst support.
+
+    Args:
+        pandoc_path: Path to the pandoc binary (default: "pandoc").
 
     Raises:
         SystemExit: If pandoc version is too old.
     """
     result = subprocess.run(
-        ["pandoc", "--version"], capture_output=True, text=True
+        [pandoc_path, "--version"], capture_output=True, text=True
     )
     if result.returncode != 0 or not result.stdout.strip():
         print("ERROR: Could not determine pandoc version.")
@@ -270,7 +272,8 @@ def check_pandoc_version_for_typst():
         sys.exit(1)
     first_line = result.stdout.splitlines()[0]  # e.g. "pandoc 3.5.0"
     version_str = first_line.split()[-1]
-    parts = [int(x) for x in version_str.split(".")]
+    # Strip non-numeric suffixes like "-rc1" from version components
+    parts = [int(re.match(r'(\d+)', x).group(1)) for x in version_str.split(".")]
     if tuple(parts) < (3, 1, 7):
         print(
             f"ERROR: Typst output requires pandoc >= 3.1.7 (found {version_str})."
@@ -376,10 +379,7 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
 #show table: set text(size: 10pt)
 
 // Images: constrain to page width
-#show image: it => {
-  set image(width: 100%)
-  it
-}
+#set image(width: 100%)
 
 $body$
 """
@@ -456,7 +456,7 @@ def main():
 
     # If Typst, check pandoc version
     if engine == "typst":
-        check_pandoc_version_for_typst()
+        check_pandoc_version_for_typst(pandoc)
 
     reason = "auto-detected" if args.engine == "auto" else "explicitly selected"
     print(f"Using PDF engine: {engine_name} ({reason})")
