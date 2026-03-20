@@ -246,6 +246,7 @@ def detect_engine(engine_arg):
 
     typst_path = shutil.which("typst")
     if typst_path:
+        check_pandoc_version_for_typst()
         return "typst", "typst"
 
     print("ERROR: No PDF engine found (looked for xelatex, pdflatex, typst).")
@@ -263,6 +264,10 @@ def check_pandoc_version_for_typst():
     result = subprocess.run(
         ["pandoc", "--version"], capture_output=True, text=True
     )
+    if result.returncode != 0 or not result.stdout.strip():
+        print("ERROR: Could not determine pandoc version.")
+        print("  Install or update with: brew install pandoc")
+        sys.exit(1)
     first_line = result.stdout.splitlines()[0]  # e.g. "pandoc 3.5.0"
     version_str = first_line.split()[-1]
     parts = [int(x) for x in version_str.split(".")]
@@ -301,9 +306,9 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
   header: context {
     if counter(page).get().first() > 1 [
       #set text(font: "EB Garamond", size: 9pt)
-      #smallcaps[$title$]
+      $if(title)$#smallcaps[$title$]
       #v(-2pt)
-      #line(length: 100%, stroke: 0.4pt + rgb("#999999"))
+      #line(length: 100%, stroke: 0.4pt + rgb("#999999"))$endif$
     ]
   },
   numbering: "1",

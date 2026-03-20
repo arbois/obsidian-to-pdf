@@ -130,7 +130,12 @@ class TestDetectEngine:
                 "pandoc": "/usr/local/bin/pandoc",
             }.get(name)
 
-        with mock.patch("shutil.which", side_effect=fake_which):
+        fake_result = mock.Mock()
+        fake_result.stdout = "pandoc 3.5.0\nCompiled with pandoc-types..."
+        fake_result.returncode = 0
+
+        with mock.patch("shutil.which", side_effect=fake_which), \
+             mock.patch("subprocess.run", return_value=fake_result):
             engine, engine_name = detect_engine("auto")
         assert engine == "typst"
         assert engine_name == "typst"
@@ -148,7 +153,7 @@ class TestDetectEngine:
             engine, engine_name = detect_engine("auto")
         assert engine_name == "xelatex"
 
-    def test_auto_errors_when_no_engine(self):
+    def test_auto_errors_when_no_engine(self, capsys):
         """Test 11: Auto-detection errors when no engine found."""
         def fake_which(name):
             if name == "pandoc":
@@ -158,8 +163,11 @@ class TestDetectEngine:
         with mock.patch("shutil.which", side_effect=fake_which):
             with pytest.raises(SystemExit):
                 detect_engine("auto")
+        captured = capsys.readouterr()
+        assert "brew install typst" in captured.out
+        assert "brew install --cask mactex" in captured.out
 
-    def test_explicit_typst_errors_when_missing(self):
+    def test_explicit_typst_errors_when_missing(self, capsys):
         """Test 12: --engine typst errors when typst not installed."""
         def fake_which(name):
             if name == "pandoc":
@@ -169,8 +177,10 @@ class TestDetectEngine:
         with mock.patch("shutil.which", side_effect=fake_which):
             with pytest.raises(SystemExit):
                 detect_engine("typst")
+        captured = capsys.readouterr()
+        assert "not found" in captured.out.lower()
 
-    def test_explicit_latex_errors_when_missing(self):
+    def test_explicit_latex_errors_when_missing(self, capsys):
         """Test 13: --engine latex errors when no LaTeX installed."""
         def fake_which(name):
             if name == "pandoc":
@@ -180,6 +190,8 @@ class TestDetectEngine:
         with mock.patch("shutil.which", side_effect=fake_which):
             with pytest.raises(SystemExit):
                 detect_engine("latex")
+        captured = capsys.readouterr()
+        assert "no latex engine found" in captured.out.lower()
 
 
 class TestPandocVersionCheck:
@@ -188,6 +200,7 @@ class TestPandocVersionCheck:
     def test_rejects_old_pandoc(self):
         """Test 14: Rejects pandoc < 3.1.7 for Typst."""
         fake_result = mock.Mock()
+        fake_result.returncode = 0
         fake_result.stdout = "pandoc 3.1.6\nCompiled with pandoc-types..."
         with mock.patch("subprocess.run", return_value=fake_result):
             with pytest.raises(SystemExit):
@@ -196,6 +209,7 @@ class TestPandocVersionCheck:
     def test_accepts_sufficient_pandoc_317(self):
         """Test 15a: Accepts pandoc 3.1.7."""
         fake_result = mock.Mock()
+        fake_result.returncode = 0
         fake_result.stdout = "pandoc 3.1.7\nCompiled with pandoc-types..."
         with mock.patch("subprocess.run", return_value=fake_result):
             check_pandoc_version_for_typst()  # should not raise
@@ -203,6 +217,7 @@ class TestPandocVersionCheck:
     def test_accepts_sufficient_pandoc_350(self):
         """Test 15b: Accepts pandoc 3.5.0."""
         fake_result = mock.Mock()
+        fake_result.returncode = 0
         fake_result.stdout = "pandoc 3.5.0\nCompiled with pandoc-types..."
         with mock.patch("subprocess.run", return_value=fake_result):
             check_pandoc_version_for_typst()  # should not raise
@@ -346,6 +361,7 @@ class TestLatexEndToEnd:
         doc.close()
         assert "Trycycle" in text
         assert "hill climber" in text.lower() or "hill-climber" in text.lower()
+        assert "Planning" in text or "planning" in text
 
 
 class TestTypstEndToEnd:
@@ -448,6 +464,7 @@ class TestTypstEndToEnd:
             cwd=str(SCRIPT_DIR),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "Resolved" in result.stdout
         pdf = TEST_VAULT / "Superpowers.pdf"
         assert pdf.exists()
         # Check for embedded image
@@ -521,16 +538,7 @@ class TestCrossEngineParity:
     def test_same_text_content(self, cleanup_pdfs):
         """Test 23: Both engines produce PDFs with same substantive text."""
         md = str(TEST_VAULT / "Trycycle Overview.md")
-        for engine in ("latex", "typst"):
-            subprocess.run(
-                [sys.executable, str(SCRIPT), "--engine", engine, md],
-                capture_output=True,
-                text=True,
-                cwd=str(SCRIPT_DIR),
-            )
         pdf = TEST_VAULT / "Trycycle Overview.pdf"
-        if not pdf.exists():
-            pytest.skip("PDF not generated")
         import fitz
 
         texts = {}
@@ -541,11 +549,13 @@ class TestCrossEngineParity:
                 text=True,
                 cwd=str(SCRIPT_DIR),
             )
+            if not pdf.exists():
+                pytest.skip(f"PDF not generated for {engine}")
             doc = fitz.open(str(pdf))
             texts[engine] = "".join(page.get_text() for page in doc)
             doc.close()
 
-        for phrase in ["Trycycle", "hill climber", "Planning", "Review"]:
+        for phrase in ["Trycycle", "hill climber", "Planning", "Review", "Dan Shapiro"]:
             for eng, text in texts.items():
                 assert phrase.lower() in text.lower(), (
                     f"'{phrase}' not found in {eng} output"
@@ -595,5 +605,7 @@ class TestCrossEngineParity:
             doc = fitz.open(str(pdf))
             text = "".join(page.get_text() for page in doc)
             doc.close()
-            # Footnotes exist in some form (footnote numbers, body text)
-            assert "1" in text, f"No footnote indicator in {engine} output"
+            # Footnote body text should appear somewhere in the PDF
+            assert "strongdm" in text.lower(), (
+                f"Footnote body text 'StrongDM' not found in {engine} output"
+            )
