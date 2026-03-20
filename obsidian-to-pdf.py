@@ -381,6 +381,9 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
 // Images: constrain to page width
 #set image(width: 100%)
 
+// Horizontal rule (pandoc emits #horizontalrule for ---)
+#let horizontalrule = line(length: 100%, stroke: 0.5pt + rgb("#cccccc"))
+
 $body$
 """
 
