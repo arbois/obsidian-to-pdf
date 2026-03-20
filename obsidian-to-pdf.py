@@ -94,6 +94,23 @@ def resolve_wikilinks(md_text, vault_root, temp_dir):
             return f'![{caption}]({image_path})'
 
     result = re.sub(pattern, replace_match, md_text)
+
+    # Strip regular wikilinks to plain text (not embeds — those are handled above)
+    # [[page]] → page, [[page|alias]] → alias, [[page#section]] → page > section
+    def strip_wikilink(m):
+        target = m.group(1)
+        alias = m.group(2)
+        if alias:
+            return alias
+        # Strip #section and #^block suffixes, show as "page > section" if present
+        if '#' in target:
+            page, fragment = target.split('#', 1)
+            fragment = fragment.lstrip('^')
+            return f"{page} > {fragment}" if page else fragment
+        return target
+
+    result = re.sub(r'\[\[([^\]|]+?)(?:\|([^\]]*?))?\]\]', strip_wikilink, result)
+
     return result, resolved_count
 
 
