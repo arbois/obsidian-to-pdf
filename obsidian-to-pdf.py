@@ -384,6 +384,22 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
 // Horizontal rule (pandoc emits #horizontalrule for ---)
 #let horizontalrule = line(length: 100%, stroke: 0.5pt + rgb("#cccccc"))
 
+// Title block with date (matching pandoc's LaTeX \maketitle)
+$if(title)$
+#align(center)[
+  #text(size: 20pt, weight: 600)[$title$]
+  $if(date)$
+  #v(0.3em)
+  #text(size: 11pt, fill: rgb("#555555"))[$date$]
+  $endif$
+  $if(author)$
+  #v(0.2em)
+  #text(size: 11pt, fill: rgb("#555555"))[$author$]
+  $endif$
+]
+#v(1em)
+$endif$
+
 $body$
 """
 
