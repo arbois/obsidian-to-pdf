@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
 """
 obsidian-to-pdf.py — Convert Obsidian markdown files to high-quality A4 PDF
-using a pandoc → LaTeX → PDF pipeline.
+using pandoc with either a LaTeX or Typst backend.
 
-Usage: python3 obsidian-to-pdf.py "filename.md"
+Usage:
+  python3 obsidian-to-pdf.py "filename.md"
+  python3 obsidian-to-pdf.py --engine typst "filename.md"
+  python3 obsidian-to-pdf.py --engine latex "filename.md"
+  python3 obsidian-to-pdf.py --engine auto  "filename.md"   (default)
+
 Output: filename.pdf in the same directory as the input file.
+
+Engine selection (--engine auto, the default):
+  1. If xelatex is on PATH, use LaTeX (xelatex). Best Unicode support.
+  2. Else if pdflatex is on PATH, use LaTeX (pdflatex).
+  3. Else if typst is on PATH (and pandoc >= 3.1.7), use Typst.
+  4. Otherwise, error with install suggestions.
+
+Typst output uses the bundled EB Garamond font (fonts/eb-garamond/) and an
+OUP-inspired template for clean, classical typesetting.
 
 Resolves Obsidian wikilinks:
   ![[image.png]]              → embedded image
@@ -13,9 +27,11 @@ Resolves Obsidian wikilinks:
   ![[file.pdf#page=N|caption]]→ extracted PDF page as image with caption
 
 Requires: pip3 install pymupdf
-System deps: pandoc, xelatex (or pdflatex)
+System deps: pandoc, plus one of: xelatex/pdflatex (brew install --cask mactex)
+             or typst (brew install typst)
 """
 
+import argparse
 import sys
 import os
 import re
@@ -193,6 +209,71 @@ def find_tool(names):
     return None
 
 
+def detect_engine(engine_arg):
+    """Detect which PDF engine to use.
+
+    Args:
+        engine_arg: One of 'auto', 'latex', 'typst'.
+
+    Returns:
+        Tuple of (engine_type, engine_name) where engine_type is 'latex' or
+        'typst', and engine_name is the specific binary name (e.g. 'xelatex',
+        'pdflatex', 'typst').
+
+    Raises:
+        SystemExit: If the requested engine is not available.
+    """
+    if engine_arg == "latex":
+        path = find_tool(["xelatex", "pdflatex"])
+        if not path:
+            print("ERROR: No LaTeX engine found (looked for xelatex, pdflatex).")
+            print("  Install with: brew install --cask mactex")
+            sys.exit(1)
+        return "latex", os.path.basename(path)
+
+    if engine_arg == "typst":
+        path = shutil.which("typst")
+        if not path:
+            print("ERROR: typst not found.")
+            print("  Install with: brew install typst")
+            sys.exit(1)
+        return "typst", "typst"
+
+    # auto: try LaTeX first, then Typst
+    latex_path = find_tool(["xelatex", "pdflatex"])
+    if latex_path:
+        return "latex", os.path.basename(latex_path)
+
+    typst_path = shutil.which("typst")
+    if typst_path:
+        return "typst", "typst"
+
+    print("ERROR: No PDF engine found (looked for xelatex, pdflatex, typst).")
+    print("  Easy option:         brew install typst")
+    print("  Full-featured option: brew install --cask mactex")
+    sys.exit(1)
+
+
+def check_pandoc_version_for_typst():
+    """Verify pandoc >= 3.1.7 for Typst support.
+
+    Raises:
+        SystemExit: If pandoc version is too old.
+    """
+    result = subprocess.run(
+        ["pandoc", "--version"], capture_output=True, text=True
+    )
+    first_line = result.stdout.splitlines()[0]  # e.g. "pandoc 3.5.0"
+    version_str = first_line.split()[-1]
+    parts = [int(x) for x in version_str.split(".")]
+    if tuple(parts) < (3, 1, 7):
+        print(
+            f"ERROR: Typst output requires pandoc >= 3.1.7 (found {version_str})."
+        )
+        print("  Update with: brew install pandoc")
+        sys.exit(1)
+
+
 LATEX_HEADER = r"""\usepackage{graphicx}
 \usepackage{ragged2e}
 \makeatletter
@@ -211,13 +292,145 @@ LATEX_HEADER = r"""\usepackage{graphicx}
 \AtBeginEnvironment{longtable}{\fontsize{10pt}{12pt}\selectfont}
 """
 
+TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
+// Uses EB Garamond for a classical serif look
+
+#set page(
+  paper: "a4",
+  margin: (left: 3.5cm, right: 3.5cm, top: 3cm, bottom: 3cm),
+  header: context {
+    if counter(page).get().first() > 1 [
+      #set text(font: "EB Garamond", size: 9pt)
+      #smallcaps[$title$]
+      #v(-2pt)
+      #line(length: 100%, stroke: 0.4pt + rgb("#999999"))
+    ]
+  },
+  numbering: "1",
+)
+
+#set text(
+  font: "EB Garamond",
+  size: 12pt,
+  lang: "en",
+)
+
+#set par(
+  justify: false,
+  leading: 0.65em,
+)
+
+// Heading hierarchy — all EB Garamond SemiBold, sized proportionally
+#show heading.where(level: 1): it => {
+  set text(size: 20pt, weight: 600)
+  v(0.5em)
+  it.body
+  v(0.3em)
+}
+
+#show heading.where(level: 2): it => {
+  set text(size: 16pt, weight: 600)
+  v(0.4em)
+  it.body
+  v(0.25em)
+}
+
+#show heading.where(level: 3): it => {
+  set text(size: 13pt, weight: 600)
+  v(0.3em)
+  it.body
+  v(0.2em)
+}
+
+#show heading.where(level: 4): it => {
+  set text(size: 12pt, weight: 600, style: "italic")
+  v(0.2em)
+  it.body
+  v(0.15em)
+}
+
+// Lists: 2em indent, 0.3em item spacing
+#set list(indent: 2em, body-indent: 0.5em, spacing: 0.3em)
+#set enum(indent: 2em, body-indent: 0.5em, spacing: 0.3em)
+
+// Code blocks: light grey background, monospace at 10pt
+#show raw.where(block: true): it => {
+  set text(size: 10pt)
+  block(
+    width: 100%,
+    fill: rgb("#f5f5f5"),
+    inset: 8pt,
+    radius: 3pt,
+    it,
+  )
+}
+
+#show raw.where(block: false): set text(size: 10pt)
+
+// Tables: 10pt font size
+#show table: set text(size: 10pt)
+
+// Images: constrain to page width
+#show image: it => {
+  set image(width: 100%)
+  it
+}
+
+$body$
+"""
+
+
+def build_latex_cmd(pandoc, engine_name, output_path, header_path, md_path):
+    """Build the pandoc command for LaTeX output."""
+    return [
+        pandoc,
+        "-f", "markdown+hard_line_breaks",
+        "-o", output_path,
+        f"--pdf-engine={engine_name}",
+        "-V", "geometry:a4paper",
+        "-V", "geometry:left=3.5cm,right=3.5cm,top=3cm,bottom=3cm",
+        "-V", "fontsize=12pt",
+        "--standalone",
+        f"--include-in-header={header_path}",
+        md_path,
+    ]
+
+
+def build_typst_cmd(pandoc, output_path, template_path, font_dir, md_path):
+    """Build the pandoc command for Typst output."""
+    return [
+        pandoc,
+        "-f", "markdown+hard_line_breaks",
+        "-t", "typst",
+        f"--template={template_path}",
+        "--pdf-engine-opt=--font-path",
+        f"--pdf-engine-opt={font_dir}",
+        "-o", output_path,
+        md_path,
+    ]
+
+
+def parse_args(argv=None):
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Convert Obsidian markdown files to high-quality A4 PDF.",
+    )
+    parser.add_argument(
+        "input_file",
+        help="Path to the Obsidian markdown file to convert.",
+    )
+    parser.add_argument(
+        "--engine",
+        choices=["typst", "latex", "auto"],
+        default="auto",
+        help="PDF engine to use (default: auto — tries LaTeX first, then Typst).",
+    )
+    return parser.parse_args(argv)
+
 
 def main():
-    if len(sys.argv) < 2:
-        print('Usage: python3 obsidian-to-pdf.py "filename.md"')
-        sys.exit(1)
-
-    input_path = sys.argv[1]
+    args = parse_args()
+    input_path = args.input_file
 
     # Resolve to absolute path
     if not os.path.isabs(input_path):
@@ -227,19 +440,21 @@ def main():
         print(f"ERROR: File not found: {input_path}")
         sys.exit(1)
 
-    # Check dependencies
+    # Check pandoc
     pandoc = find_tool(["pandoc"])
     if not pandoc:
         print("ERROR: pandoc not found. Install with: brew install pandoc")
         sys.exit(1)
 
-    # Prefer xelatex for Unicode support (smart quotes, em dashes)
-    pdf_engine = find_tool(["xelatex", "pdflatex"])
-    if not pdf_engine:
-        print("ERROR: No LaTeX engine found. Install with: brew install --cask mactex")
-        sys.exit(1)
-    engine_name = os.path.basename(pdf_engine)
-    print(f"Using PDF engine: {engine_name}")
+    # Detect engine
+    engine, engine_name = detect_engine(args.engine)
+
+    # If Typst, check pandoc version
+    if engine == "typst":
+        check_pandoc_version_for_typst()
+
+    reason = "auto-detected" if args.engine == "auto" else "explicitly selected"
+    print(f"Using PDF engine: {engine_name} ({reason})")
 
     # Vault root = directory containing the md file
     vault_root = os.path.dirname(os.path.abspath(input_path))
@@ -253,7 +468,7 @@ def main():
     with open(input_path, 'r', encoding='utf-8') as f:
         md_text = f.read()
 
-    # Create temp directory for extracted PDF pages and header file
+    # Create temp directory for extracted PDF pages, header/template files
     temp_dir = tempfile.mkdtemp(prefix="obsidian-pdf-")
     try:
         # Resolve wikilinks
@@ -267,29 +482,29 @@ def main():
         # Ensure blank lines before lists for proper pandoc parsing
         md_text = ensure_list_spacing(md_text)
 
-        # Write LaTeX header-includes to a temp file
-        header_path = os.path.join(temp_dir, "header.tex")
-        with open(header_path, 'w') as f:
-            f.write(LATEX_HEADER)
-
         # Write processed markdown to a temp file
         md_path = os.path.join(temp_dir, "input.md")
         with open(md_path, 'w', encoding='utf-8') as f:
             f.write(md_text)
 
-        # Build pandoc command
-        cmd = [
-            pandoc,
-            "-f", "markdown+hard_line_breaks",
-            "-o", output_path,
-            f"--pdf-engine={engine_name}",
-            "-V", "geometry:a4paper",
-            "-V", "geometry:left=3.5cm,right=3.5cm,top=3cm,bottom=3cm",
-            "-V", "fontsize=12pt",
-            "--standalone",
-            f"--include-in-header={header_path}",
-            md_path,
-        ]
+        # Build engine-specific command
+        if engine == "typst":
+            # Write Typst template to temp file
+            template_path = os.path.join(temp_dir, "template.typst")
+            with open(template_path, 'w') as f:
+                f.write(TYPST_TEMPLATE)
+
+            font_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "fonts", "eb-garamond",
+            )
+            cmd = build_typst_cmd(pandoc, output_path, template_path, font_dir, md_path)
+        else:
+            # Write LaTeX header-includes to a temp file
+            header_path = os.path.join(temp_dir, "header.tex")
+            with open(header_path, 'w') as f:
+                f.write(LATEX_HEADER)
+            cmd = build_latex_cmd(pandoc, engine_name, output_path, header_path, md_path)
 
         print(f"Running pandoc...")
         result = subprocess.run(
