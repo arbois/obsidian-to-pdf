@@ -64,11 +64,12 @@ def _pandoc_version_ok():
     if not HAS_PANDOC:
         return False
     try:
+        import re
         out = subprocess.run(
             ["pandoc", "--version"], capture_output=True, text=True
         ).stdout
         ver = out.splitlines()[0].split()[-1]
-        parts = [int(x) for x in ver.split(".")]
+        parts = [int(re.match(r'(\d+)', x).group(1)) for x in ver.split(".")]
         return tuple(parts) >= (3, 1, 7)
     except Exception:
         return False
@@ -248,19 +249,8 @@ class TestPandocVersionCheck:
 class TestInvalidEngine:
     """Test 16: invalid --engine value rejected by argparse."""
 
-    @skip_no_pandoc
-    def test_invalid_engine_rejected(self):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--engine", "foobar", "test-vault/dummy.md"],
-            capture_output=True,
-            text=True,
-            cwd=str(SCRIPT_DIR),
-        )
-        assert result.returncode != 0
-        assert "invalid choice" in result.stderr.lower()
-
     def test_invalid_engine_rejected_any_env(self):
-        """Same test but works even without pandoc - argparse fails first."""
+        """Argparse rejects invalid --engine values before any engine check."""
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--engine", "foobar", "dummy.md"],
             capture_output=True,
@@ -486,7 +476,7 @@ class TestTypstEndToEnd:
             cwd=str(SCRIPT_DIR),
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
-        assert "Resolved" in result.stdout
+        assert "Resolved 1 image(s)" in result.stdout
         pdf = TEST_VAULT / "Superpowers.pdf"
         assert pdf.exists()
         # Check for embedded image
@@ -557,23 +547,26 @@ class TestCrossEngineParity:
     @skip_no_pandoc
     @skip_no_both
     @pytest.mark.skipif(not PANDOC_OK_FOR_TYPST, reason="pandoc < 3.1.7")
-    def test_same_text_content(self, cleanup_pdfs):
+    def test_same_text_content(self, cleanup_pdfs, tmp_dir):
         """Test 23: Both engines produce PDFs with same substantive text."""
-        md = str(TEST_VAULT / "Trycycle Overview.md")
-        pdf = TEST_VAULT / "Trycycle Overview.pdf"
+        md_src = TEST_VAULT / "Trycycle Overview.md"
         import fitz
 
         texts = {}
         for engine in ("latex", "typst"):
+            # Copy md to engine-specific temp file so outputs don't collide
+            engine_md = os.path.join(tmp_dir, f"Trycycle Overview_{engine}.md")
+            shutil.copy2(str(md_src), engine_md)
+            engine_pdf = os.path.splitext(engine_md)[0] + ".pdf"
             subprocess.run(
-                [sys.executable, str(SCRIPT), "--engine", engine, md],
+                [sys.executable, str(SCRIPT), "--engine", engine, engine_md],
                 capture_output=True,
                 text=True,
                 cwd=str(SCRIPT_DIR),
             )
-            if not pdf.exists():
+            if not os.path.exists(engine_pdf):
                 pytest.skip(f"PDF not generated for {engine}")
-            doc = fitz.open(str(pdf))
+            doc = fitz.open(engine_pdf)
             texts[engine] = "".join(page.get_text() for page in doc)
             doc.close()
 
@@ -586,20 +579,22 @@ class TestCrossEngineParity:
     @skip_no_pandoc
     @skip_no_both
     @pytest.mark.skipif(not PANDOC_OK_FOR_TYPST, reason="pandoc < 3.1.7")
-    def test_table_content_both(self, cleanup_pdfs):
+    def test_table_content_both(self, cleanup_pdfs, tmp_dir):
         """Test 24: Table content present in both engine outputs."""
-        md = str(TEST_VAULT / "Trycycle Overview.md")
+        md_src = TEST_VAULT / "Trycycle Overview.md"
         import fitz
 
         for engine in ("latex", "typst"):
+            engine_md = os.path.join(tmp_dir, f"Trycycle Overview_{engine}.md")
+            shutil.copy2(str(md_src), engine_md)
+            engine_pdf = os.path.splitext(engine_md)[0] + ".pdf"
             subprocess.run(
-                [sys.executable, str(SCRIPT), "--engine", engine, md],
+                [sys.executable, str(SCRIPT), "--engine", engine, engine_md],
                 capture_output=True,
                 text=True,
                 cwd=str(SCRIPT_DIR),
             )
-            pdf = TEST_VAULT / "Trycycle Overview.pdf"
-            doc = fitz.open(str(pdf))
+            doc = fitz.open(engine_pdf)
             text = "".join(page.get_text() for page in doc).lower()
             doc.close()
             assert "component" in text or "role" in text, (
@@ -609,22 +604,24 @@ class TestCrossEngineParity:
     @skip_no_pandoc
     @skip_no_both
     @pytest.mark.skipif(not PANDOC_OK_FOR_TYPST, reason="pandoc < 3.1.7")
-    def test_footnote_content_both(self, cleanup_pdfs):
+    def test_footnote_content_both(self, cleanup_pdfs, tmp_dir):
         """Test 25: Footnote content present in both engine outputs."""
-        md = str(TEST_VAULT / "Trycycle Overview.md")
+        md_src = TEST_VAULT / "Trycycle Overview.md"
         import fitz
 
         for engine in ("latex", "typst"):
+            engine_md = os.path.join(tmp_dir, f"Trycycle Overview_{engine}.md")
+            shutil.copy2(str(md_src), engine_md)
+            engine_pdf = os.path.splitext(engine_md)[0] + ".pdf"
             subprocess.run(
-                [sys.executable, str(SCRIPT), "--engine", engine, md],
+                [sys.executable, str(SCRIPT), "--engine", engine, engine_md],
                 capture_output=True,
                 text=True,
                 cwd=str(SCRIPT_DIR),
             )
-            pdf = TEST_VAULT / "Trycycle Overview.pdf"
-            if not pdf.exists():
+            if not os.path.exists(engine_pdf):
                 pytest.skip(f"PDF not generated for {engine}")
-            doc = fitz.open(str(pdf))
+            doc = fitz.open(engine_pdf)
             text = "".join(page.get_text() for page in doc)
             doc.close()
             # Footnote body text should appear somewhere in the PDF
