@@ -318,7 +318,7 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
 )
 
 #set text(
-  font: "EB Garamond",
+  font: ("EB Garamond", "Noto Sans Symbols2"),
   size: 12pt,
   lang: "en",
 )
@@ -358,8 +358,8 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
 }
 
 // Lists: 2em indent, 0.3em item spacing
-#set list(indent: 2em, body-indent: 0.5em, spacing: 0.3em)
-#set enum(indent: 2em, body-indent: 0.5em, spacing: 0.3em)
+#set list(indent: 2em, body-indent: 0.5em, spacing: 0.65em)
+#set enum(indent: 2em, body-indent: 0.5em, spacing: 0.65em)
 
 // Code blocks: light grey background, monospace at 10pt
 #show raw.where(block: true): it => {
@@ -519,7 +519,7 @@ def main():
 
             font_dir = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
-                "fonts", "eb-garamond",
+                "fonts",
             )
             cmd = build_typst_cmd(pandoc, output_path, template_path, font_dir, md_path)
         else:
