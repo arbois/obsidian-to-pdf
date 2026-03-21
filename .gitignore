@@ -1,1 +1,6 @@
 .worktrees
+
+# Comparison harness (dev only)
+comparison.pdf
+compare_engines.py
+__pycache__/
