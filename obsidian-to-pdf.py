@@ -114,6 +114,48 @@ def resolve_wikilinks(md_text, vault_root, temp_dir):
     return result, resolved_count
 
 
+def resolve_callouts(md_text):
+    """Convert Obsidian callout syntax to styled markdown blockquotes.
+
+    Transforms:
+        > [!warning] Title
+        > Body text
+
+    Into:
+        > **⚠️ Warning: Title**
+        >
+        > Body text
+    """
+    callout_icons = {
+        'note': '📝', 'abstract': '📋', 'summary': '📋', 'tldr': '📋',
+        'info': 'ℹ️', 'todo': '🔲', 'tip': '💡', 'hint': '💡',
+        'important': '❗', 'success': '✅', 'check': '✅', 'done': '✅',
+        'question': '❓', 'help': '❓', 'faq': '❓',
+        'warning': '⚠️', 'caution': '⚠️', 'attention': '⚠️',
+        'failure': '❌', 'fail': '❌', 'missing': '❌',
+        'danger': '🔴', 'error': '🔴', 'bug': '🐛',
+        'example': '📖', 'quote': '💬', 'cite': '💬',
+    }
+
+    lines = md_text.split('\n')
+    output = []
+    for line in lines:
+        m = re.match(r'^>\s*\[!(\w+)\]\s*(.*)', line)
+        if m:
+            callout_type = m.group(1).lower()
+            title = m.group(2).strip()
+            icon = callout_icons.get(callout_type, '📝')
+            label = callout_type.capitalize()
+            if title:
+                output.append(f'> **{icon} {label}: {title}**')
+            else:
+                output.append(f'> **{icon} {label}**')
+            output.append('>')
+        else:
+            output.append(line)
+    return '\n'.join(output)
+
+
 def ensure_list_spacing(md_text):
     """Ensure blank lines before list items so pandoc recognises them as lists.
 
@@ -218,6 +260,9 @@ def main():
         print("Resolving wikilinks...")
         md_text, resolved_count = resolve_wikilinks(md_text, vault_root, temp_dir)
         print(f"  Resolved {resolved_count} image(s)")
+
+        # Convert Obsidian callouts to styled blockquotes
+        md_text = resolve_callouts(md_text)
 
         # Ensure blank lines before lists for proper pandoc parsing
         md_text = ensure_list_spacing(md_text)
