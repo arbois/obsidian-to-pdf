@@ -378,8 +378,7 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
 // Tables: 10pt font size
 #show table: set text(size: 10pt)
 
-// Images: constrain to page width
-#set image(width: 100%)
+// Images: use natural size (Typst already constrains to container width)
 
 // Horizontal rule (pandoc emits #horizontalrule for ---)
 #let horizontalrule = line(length: 100%, stroke: 0.5pt + rgb("#cccccc"))
