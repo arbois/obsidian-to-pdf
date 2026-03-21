@@ -357,9 +357,16 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
   v(0.15em)
 }
 
-// Lists: 2em indent, 0.3em item spacing
-#set list(indent: 2em, body-indent: 0.5em, spacing: 0.65em)
-#set enum(indent: 2em, body-indent: 0.5em, spacing: 0.65em)
+// Lists: 2em indent, compact spacing
+#set list(indent: 2em, body-indent: 0.5em, spacing: 0.4em)
+#set enum(indent: 2em, body-indent: 0.5em, spacing: 0.4em)
+
+// Blockquotes: left bar + indentation (visually distinct from tables)
+#show quote.where(block: true): it => {
+  block(above: 0.8em, below: 0.8em, pad(left: 1.5em,
+    block(stroke: (left: 2pt + rgb("#cccccc")), inset: (left: 1em, y: 0.4em), it.body)
+  ))
+}
 
 // Code blocks: light grey background, monospace at 10pt
 #show raw.where(block: true): it => {
@@ -375,8 +382,33 @@ TYPST_TEMPLATE = r"""// OUP-inspired Typst template for obsidian-to-pdf
 
 #show raw.where(block: false): set text(size: 10pt)
 
-// Tables: 10pt font size
+// Tables: 10pt, compact, minimal style (matching LaTeX booktabs look)
 #show table: set text(size: 10pt)
+#set table(
+  stroke: none,
+  inset: (x: 0.5em, y: 0.35em),
+  align: left,
+)
+// Override pandoc's center-aligned figure wrapper and per-column auto align
+#show figure.where(kind: table): set figure.caption(position: bottom)
+#show figure.where(kind: table): set align(center)
+#show table.cell: set align(left)
+#show table.cell.where(y: 0): it => {
+  set text(weight: "regular")
+  it
+}
+// Booktabs-style table rules: heavy top/bottom, thin after header
+// Pandoc emits table.hline() after the header row — set its default to thin
+#set table.hline(stroke: 0.5pt)
+// Use cell stroke to draw heavy top on first row and heavy bottom on all rows
+// (only the last row's bottom will be visible)
+#set table(
+  stroke: (x, y) => (
+    left: 0pt, right: 0pt,
+    top: if y == 0 { 1.2pt } else { 0pt },
+    bottom: 1.2pt,
+  ),
+)
 
 // Images: use natural size (Typst already constrains to container width)
 
@@ -403,9 +435,20 @@ $body$
 """
 
 
+def mermaid_filter_args():
+    """Return pandoc filter args for Mermaid diagrams if available."""
+    if shutil.which("mermaid-filter"):
+        return ["--filter", "mermaid-filter"]
+    if shutil.which("mmdc"):
+        # mmdc is the Mermaid CLI; mermaid-filter wraps it for pandoc
+        # Without mermaid-filter, we can't use it directly
+        pass
+    return []
+
+
 def build_latex_cmd(pandoc, engine_name, output_path, header_path, md_path):
     """Build the pandoc command for LaTeX output."""
-    return [
+    cmd = [
         pandoc,
         "-f", "markdown+hard_line_breaks",
         "-o", output_path,
@@ -415,13 +458,15 @@ def build_latex_cmd(pandoc, engine_name, output_path, header_path, md_path):
         "-V", "fontsize=12pt",
         "--standalone",
         f"--include-in-header={header_path}",
-        md_path,
     ]
+    cmd.extend(mermaid_filter_args())
+    cmd.append(md_path)
+    return cmd
 
 
 def build_typst_cmd(pandoc, output_path, template_path, font_dir, md_path):
     """Build the pandoc command for Typst output."""
-    return [
+    cmd = [
         pandoc,
         "-f", "markdown+hard_line_breaks",
         "-t", "typst",
@@ -429,8 +474,10 @@ def build_typst_cmd(pandoc, output_path, template_path, font_dir, md_path):
         "--pdf-engine-opt=--font-path",
         f"--pdf-engine-opt={font_dir}",
         "-o", output_path,
-        md_path,
     ]
+    cmd.extend(mermaid_filter_args())
+    cmd.append(md_path)
+    return cmd
 
 
 def parse_args(argv=None):
